@@ -1,6 +1,8 @@
 import json
 import time
 import requests
+import asyncio
+import aiohttp   # https://github.com/pythontoday/scrap_tutorial/blob/master/lesson9/main_asyncio.py
 from bs4 import BeautifulSoup
 
 
@@ -34,23 +36,30 @@ class Parser:
                                      "comment_url": f"https://news.ycombinator.com/item?id={news['id']}"}
             print(self.news.keys())
 
-    def download_news(self, news_title):
+    async def download_news(self, session, news_title):
         """
         Скачивание новости: контент новости, страница комментариев, ссылки в комментариях
         """
         news = self.news[news_title]
-        news_page_response = requests.get(url=news["news_url"], headers=self.headers)
-        news["content"] = news_page_response.text
-        news_comment_response = requests.get(url=news["comment_url"], headers=self.headers)
-        news["comment_page_content"] = news_comment_response.text
-        soup = BeautifulSoup(news_comment_response.text, "html.parser")
-        all_tags_a_from_comments = soup.find_all('a')
-        all_links_from_comments = []
-        for tag in all_tags_a_from_comments:
-            href = tag["href"]
-            if "http" in href:
-                all_links_from_comments.append(href)
-        print(f"Log all_links_from_comments {all_links_from_comments}")
+        async with session.get(url=news["news_url"], headers=self.headers) as news_page_response:
+            # news_page_response = requests.get(url=news["news_url"], headers=self.headers)
+            news["content"] = news_page_response.text
+            news_comment_response = requests.get(url=news["comment_url"], headers=self.headers)
+            news["comment_page_content"] = news_comment_response.text
+            soup = BeautifulSoup(news_comment_response.text, "html.parser")
+            all_tags_a_from_comments = soup.find_all('a')
+            all_links_from_comments = []
+            for tag in all_tags_a_from_comments:
+                href = tag["href"]
+                if "http" in href:
+                    all_links_from_comments.append(href)
+            print(f"Log all_links_from_comments {all_links_from_comments}")
+            news_comment_links_data = []
+            for comment_link in all_links_from_comments:
+                comment_link_response = requests.get(url=comment_link, headers=self.headers)
+                news_comment_links_data.append({f"{comment_link}": comment_link_response.text})
+            news["news_comment_links_data"] = news_comment_links_data
+            self.news[news_title] = news
 
     def save_to_file(self):
         json.dump(self.news, open("dump.json", 'w'))
