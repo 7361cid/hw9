@@ -1,4 +1,5 @@
-import json
+import sys
+import numpy as np
 import time
 import requests
 import aiohttp
@@ -25,13 +26,9 @@ class Parser:
         """
         response = requests.get(url=self.url, headers=self.headers)
         soup = BeautifulSoup(response.text, "html.parser")
-        print(f"Log  {soup}")
         all_news = soup.find_all('tr', class_='athing')
         for news in all_news:
-            # https://news.ycombinator.com/item?id=32624461  шаблон страницы с комментом
-            print(f"Log  news \n {news} \n id {news['id']}")
-            print(f"Log  news2 \n {news.contents[4].a['href']}  {type(news.contents[4])} \n")
-            news_title = news.text
+            news_title = news.text.replace("\n", "")
             url = news.contents[4].a['href']
             if "http" not in url:
                 url = f"https://news.ycombinator.com/{url}"
@@ -39,42 +36,43 @@ class Parser:
                                      "comment_url": f"https://news.ycombinator.com/item?id={news['id']}"}
             print(self.news.keys())
 
-    def load(self, url):
+    def load(self, news_title):
         try:
-            response = requests.get(url=url, headers=self.headers)
-            return response.text
+            response = requests.get(url=self.news[news_title]["news_url"], headers=self.headers)
         except Exception:
-            print(f"Log bad url {url}")
+            print(f'Bad url {self.news[news_title]["news_url"]}')
+        else:
+            print(f'Download news {news_title}')
+            return response.text
 
     async def download_news(self):
         """
         Скачивание новости: контент новости, страница комментариев, ссылки в комментариях
         """
         loop = asyncio.get_running_loop()
-        all_news_data = []
         with concurrent.futures.ProcessPoolExecutor() as pool:
-            for key in list(self.news.keys()):
-                print(f"Log key {key}")
-                news_data = await loop.run_in_executor(pool, self.load, self.news[key]["news_url"])
-                all_news_data.append(news_data)
-        return all_news_data
-       # async with aiohttp.ClientSession() as session:
-       #     tasks = []
-       #     for key in list(self.news.keys()):
-       #         tasks.append(asyncio.create_task(session.get(self.news[key]["news_url"])))
-
-       #     responses = await asyncio.gather(*tasks)
-       #     return [await r.text() for r in responses]
+            for news_title in list(self.news.keys())[:2]:
+                news_content = await loop.run_in_executor(pool, self.load, news_title)
+                self.news[news_title]["content"] = news_content
 
     def save_to_file(self):
-        json.dump(self.news, open("dump.json", 'w'))
+        dictionary = {}
+        for key in list(self.news.keys()):
+            dictionary[key] = self.news[key]
+        np.save('my_file.npy', dictionary)
+
+    def load_dict_from_file(self):
+        return np.load('my_file.npy', allow_pickle='TRUE').item()
 
 
 def main():
     parser = Parser(url="https://news.ycombinator.com/")
     parser.find_news()
-    data = asyncio.run(parser.download_news())
-    print(f"Log data {type(data)} --- {len(data)}")
+    asyncio.run(parser.download_news())
+    parser.save_to_file()
+    read_dictionary = parser.load_dict_from_file()
+    print(f" SIZE {sys.getsizeof(read_dictionary)}")
+    print(f'read_dictionary content {read_dictionary[list(read_dictionary.keys())[0]]["content"]}')
     finish_time = time.time() - start_time
     print(f"Затраченное на работу скрипта время: {finish_time}")
 
