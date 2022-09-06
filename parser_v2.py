@@ -2,7 +2,6 @@ import sys
 import numpy as np
 import time
 import requests
-import aiohttp
 import asyncio
 
 from bs4 import BeautifulSoup
@@ -36,14 +35,45 @@ class Parser:
                                      "comment_url": f"https://news.ycombinator.com/item?id={news['id']}"}
             print(self.news.keys())
 
-    def load(self, news_title):
-        try:
-            response = requests.get(url=self.news[news_title]["news_url"], headers=self.headers)
-        except Exception:
-            print(f'Bad url {self.news[news_title]["news_url"]}')
-        else:
-            print(f'Download news {news_title}')
-            return response.text
+    def download_news_page_content(self, news_title, retries=3):
+        update_news_data = self.news[news_title]
+        while retries:
+            try:
+                response = requests.get(url=self.news[news_title]["news_url"], headers=self.headers)
+            except Exception:
+                print(f'Bad url {self.news[news_title]["news_url"]} retries left {retries}')
+                retries -= 1
+            else:
+                update_news_data["content"] = response.text
+                break
+        return update_news_data
+
+    def download_news_comment_page(self, news_title, retries=3):
+        update_news_data = self.news[news_title]
+        while retries:
+            try:
+                response = requests.get(url=self.news[news_title]["comment_url"], headers=self.headers)
+            except Exception:
+                print(f'Bad url {self.news[news_title]["comment_url"]} retries left {retries}')
+                retries -= 1
+            else:
+                update_news_data["comment_page_content"] = response.text
+                all_links_from_comments = self.parse_comment_page_links(response)
+                if all_links_from_comments:
+                    update_news_data["links_from_comments"] = all_links_from_comments
+                break
+        return update_news_data
+
+    @staticmethod
+    def parse_comment_page_links(response):
+        soup = BeautifulSoup(response.text, "html.parser")
+        all_tags_a_from_comments = soup.find_all('a')
+        all_links_from_comments = []
+        for tag in all_tags_a_from_comments:
+            href = tag["href"]
+            if "http" in href:
+                all_links_from_comments.append(href)
+        return all_links_from_comments
 
     async def download_news(self):
         """
@@ -52,8 +82,10 @@ class Parser:
         loop = asyncio.get_running_loop()
         with concurrent.futures.ProcessPoolExecutor() as pool:
             for news_title in list(self.news.keys())[:2]:
-                news_content = await loop.run_in_executor(pool, self.load, news_title)
-                self.news[news_title]["content"] = news_content
+                news_changed = await loop.run_in_executor(pool, self.download_news_page_content, news_title)
+                self.news[news_title] = news_changed
+                news_changed = await loop.run_in_executor(pool, self.download_news_comment_page, news_title)
+                self.news[news_title] = news_changed
 
     def save_to_file(self):
         dictionary = {}
@@ -72,7 +104,7 @@ def main():
     parser.save_to_file()
     read_dictionary = parser.load_dict_from_file()
     print(f" SIZE {sys.getsizeof(read_dictionary)}")
-    print(f'read_dictionary content {read_dictionary[list(read_dictionary.keys())[0]]["content"]}')
+    print(f'read_dictionary content {read_dictionary[list(read_dictionary.keys())[0]]["links_from_comments"]}')
     finish_time = time.time() - start_time
     print(f"Затраченное на работу скрипта время: {finish_time}")
 
