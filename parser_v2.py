@@ -60,8 +60,26 @@ class Parser:
                 update_news_data["comment_page_content"] = response.text
                 all_links_from_comments = self.parse_comment_page_links(response)
                 if all_links_from_comments:
-                    update_news_data["links_from_comments"] = all_links_from_comments
+                    update_news_data["links_from_comments"] = list(set(all_links_from_comments))
                 break
+        return update_news_data
+
+    def download_comments_url_content(self, news_title, retries=3):
+        update_news_data = self.news[news_title]
+        update_news_data["content_from_comment_urls"] = {}
+        print(f'Log comments links {update_news_data["links_from_comments"]} '
+              f'\n length  {len(update_news_data["links_from_comments"])}')
+        for url in update_news_data["links_from_comments"]:
+            url_retries = retries
+            while url_retries:
+                try:
+                    response = requests.get(url=url, headers=self.headers)
+                except Exception:
+                    url_retries -= 1
+                    print(f'Bad url in comment {self.news[news_title]["comment_url"]} retries left {url_retries}')
+                else:
+                    update_news_data["content_from_comment_urls"][url] = response.text
+                    break
         return update_news_data
 
     @staticmethod
@@ -86,6 +104,9 @@ class Parser:
                 self.news[news_title] = news_changed
                 news_changed = await loop.run_in_executor(pool, self.download_news_comment_page, news_title)
                 self.news[news_title] = news_changed
+                if self.news[news_title]["links_from_comments"]:
+                    news_changed = await loop.run_in_executor(pool, self.download_comments_url_content, news_title)
+                    self.news[news_title] = news_changed
 
     def save_to_file(self):
         dictionary = {}
@@ -104,7 +125,7 @@ def main():
     parser.save_to_file()
     read_dictionary = parser.load_dict_from_file()
     print(f" SIZE {sys.getsizeof(read_dictionary)}")
-    print(f'read_dictionary content {read_dictionary[list(read_dictionary.keys())[0]]["links_from_comments"]}')
+    print(f'read_dictionary content {read_dictionary[list(read_dictionary.keys())[0]]["content_from_comment_urls"]}')
     finish_time = time.time() - start_time
     print(f"Затраченное на работу скрипта время: {finish_time}")
 
